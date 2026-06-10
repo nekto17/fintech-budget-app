@@ -204,23 +204,8 @@ export default function App() {
       {/* Имитация премиального смартфона, идеально повторяющего интерфейс Saldo */}
       <div className="w-full max-w-md bg-white min-h-screen shadow-[0_24px_64px_-16px_rgba(0,0,0,0.15)] flex flex-col relative pb-28 overflow-hidden rounded-none md:rounded-[40px] md:my-6 md:min-h-[840px] md:max-h-[900px]">
         
-        {}
-        {/* Имитация системной плашки Android / iOS */}
-        <div className="px-7 pt-4 pb-2 flex justify-between items-center text-xs font-semibold text-[#8C9099] select-none bg-white z-20">
-          <span>9:41</span>
-          <div className="flex items-center space-x-1.5">
-            <svg className="w-4 h-4 fill-current" viewBox="0 0 24 24">
-              <path d="M12 3c-4.97 0-9 4.03-9 9s4.03 9 9 9 9-4.03 9-9-4.03-9-9-9zm0 15c-3.31 0-6-2.69-6-6s2.69-6 6-6 6 2.69 6 6-2.69 6-6 6z"/>
-            </svg>
-            <span className="text-[10px] tracking-widest font-bold">LTE</span>
-            <div className="w-5 h-2.5 border border-[#8C9099] rounded-sm p-0.5 flex items-center">
-              <div className="h-full w-3.5 bg-[#8C9099] rounded-2xs"></div>
-            </div>
-          </div>
-        </div>
-
         {/* ШАПКА ПРИЛОЖЕНИЯ В СТИЛЕ SALDO */}
-        <header className="px-6 pt-2 pb-4 bg-white flex justify-between items-center border-b border-[#F0F2F6]">
+        <header className="px-6 pt-6 pb-4 bg-white flex justify-between items-center border-b border-[#F0F2F6]">
           <div>
             <h1 className="text-2xl font-black tracking-tight text-[#1A1C1F]">
               {activeTab === 'home' && 'Статистика'}
