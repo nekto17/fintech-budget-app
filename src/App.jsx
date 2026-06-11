@@ -5,20 +5,18 @@ import {
   FileText, 
   Plus, 
   Trash2, 
-  Edit3, 
-  Check, 
   X,
-  ChevronRight,
+  Check,
   Calendar,
   Clock,
-  PieChart
+  ChevronRight
 } from 'lucide-react';
 
 const DAYS_OF_WEEK = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
 const MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 const QUARTER_MONTHS = ['1-й месяц квартала', '2-й месяц квартала', '3-й месяц квартала'];
 
-// Цветовая гамма маркеров как на скриншоте "123.jpg" для разделения категорий
+// Цветовая гамма из скриншота "123.jpg" приложения Saldo
 const COLOR_PALETTE = [
   '#5B50F2', // Ультрамарин / Индиго
   '#30B0C7', // Бирюзовый
@@ -35,12 +33,34 @@ const INITIAL_TEMPLATES = [
   { id: '5', name: 'Налог на имущество', amount: 4500, period: 'Ежегодно', day: '20', monthOfYear: 'Ноябрь', color: '#FF3B30' },
 ];
 
+// Функция проверки: должен ли шаблон отображаться в указанную дату (месяц)
+const isTemplateActiveInMonth = (template, dateObj) => {
+  const currentMonth = dateObj.getMonth(); // 0-11
+  
+  if (template.period === 'Еженедельно' || template.period === 'Ежемесячно') {
+    return true;
+  }
+  if (template.period === 'Ежеквартально') {
+    const monthInQuarterIndex = currentMonth % 3; // 0, 1 или 2 месяц в текущем квартале
+    const mapping = {
+      '1-й месяц квартала': 0,
+      '2-й месяц квартала': 1,
+      '3-й месяц квартала': 2
+    };
+    const targetIndex = mapping[template.monthInQuarter] !== undefined ? mapping[template.monthInQuarter] : 0;
+    return monthInQuarterIndex === targetIndex;
+  }
+  if (template.period === 'Ежегодно') {
+    const templateMonthIndex = MONTHS.indexOf(template.monthOfYear);
+    return currentMonth === templateMonthIndex;
+  }
+  return true;
+};
+
 export default function App() {
   const [activeTab, setActiveTab] = useState('home'); // 'home' | 'month' | 'registry'
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [modalMode, setModalMode] = useState('create'); // 'create' | 'edit'
-  
-  // Переключатель фильтра на вкладке списка (по аналогии со слайдером "Мне должны / Я должен" из 123.jpg)
   const [monthFilter, setMonthFilter] = useState('all'); // 'all' | 'pending' | 'completed'
 
   // --- Состояния данных ---
@@ -51,18 +71,51 @@ export default function App() {
 
   const [monthlyPayments, setMonthlyPayments] = useState(() => {
     const saved = localStorage.getItem('saldo_monthly');
-    if (saved) return JSON.parse(saved);
+    const templatesSaved = localStorage.getItem('saldo_templates');
+    const parsedTemplates = templatesSaved ? JSON.parse(templatesSaved) : INITIAL_TEMPLATES;
     
-    // Генерация дефолтных платежей на основе шаблонов
-    return INITIAL_TEMPLATES.map((t, idx) => ({
-      id: `m-${t.id}`,
-      templateId: t.id,
-      name: t.name,
-      amount: t.amount,
-      day: t.period === 'Еженедельно' ? t.dayOfWeek : t.day,
-      completed: false,
-      color: t.color || COLOR_PALETTE[idx % COLOR_PALETTE.length]
-    }));
+    const today = new Date();
+    const todayString = `${today.getFullYear()}-${today.getMonth() + 1}`; // формат "ГГГГ-М"
+    const savedMonthYear = localStorage.getItem('saldo_current_month_year');
+
+    // Проверяем: наступил ли новый месяц?
+    if (savedMonthYear !== todayString) {
+      // НАСТУПИЛ НОВЫЙ МЕСЯЦ -> Сбрасываем статус оплаты (completed: false)
+      localStorage.setItem('saldo_current_month_year', todayString);
+      
+      const freshlyGenerated = parsedTemplates
+        .filter(t => isTemplateActiveInMonth(t, today))
+        .map((t, idx) => ({
+          id: `m-${t.id}`,
+          templateId: t.id,
+          name: t.name,
+          amount: Number(t.amount),
+          day: t.period === 'Еженедельно' ? t.dayOfWeek : t.day,
+          completed: false, // Всегда false для нового месяца
+          color: t.color || COLOR_PALETTE[idx % COLOR_PALETTE.length]
+        }));
+      
+      localStorage.setItem('saldo_monthly', JSON.stringify(freshlyGenerated));
+      return freshlyGenerated;
+    } else {
+      // Тот же месяц -> Загружаем из локального хранилища сохраненный прогресс оплат
+      if (saved) return JSON.parse(saved);
+      
+      // Дефолтная генерация, если локальное хранилище пустое
+      const generated = parsedTemplates
+        .filter(t => isTemplateActiveInMonth(t, today))
+        .map((t, idx) => ({
+          id: `m-${t.id}`,
+          templateId: t.id,
+          name: t.name,
+          amount: Number(t.amount),
+          day: t.period === 'Еженедельно' ? t.dayOfWeek : t.day,
+          completed: false,
+          color: t.color || COLOR_PALETTE[idx % COLOR_PALETTE.length]
+        }));
+      localStorage.setItem('saldo_monthly', JSON.stringify(generated));
+      return generated;
+    }
   });
 
   const [currentTemplate, setCurrentTemplate] = useState({
@@ -79,8 +132,28 @@ export default function App() {
 
   useEffect(() => {
     localStorage.setItem('saldo_templates', JSON.stringify(templates));
-    localStorage.setItem('saldo_monthly', JSON.stringify(monthlyPayments));
-  }, [templates, monthlyPayments]);
+    
+    const today = new Date();
+    // При изменении шаблонов синхронизируем только активные для текущего месяца платежи
+    const activeTemplates = templates.filter(t => isTemplateActiveInMonth(t, today));
+    
+    setMonthlyPayments(prev => {
+      const updated = activeTemplates.map((t, idx) => {
+        const existing = prev.find(p => p.templateId === t.id);
+        return {
+          id: `m-${t.id}`,
+          templateId: t.id,
+          name: t.name,
+          amount: Number(t.amount),
+          day: t.period === 'Еженедельно' ? t.dayOfWeek : t.day,
+          completed: existing ? existing.completed : false, // Сохраняем прогресс оплаты
+          color: t.color || COLOR_PALETTE[idx % COLOR_PALETTE.length]
+        };
+      });
+      localStorage.setItem('saldo_monthly', JSON.stringify(updated));
+      return updated;
+    });
+  }, [templates]);
 
   const stats = useMemo(() => {
     const total = monthlyPayments.reduce((sum, p) => sum + Number(p.amount), 0);
@@ -88,8 +161,6 @@ export default function App() {
     const remaining = total - paid;
     const percent = total > 0 ? Math.round((paid / total) * 100) : 0;
     
-    // Подготовка сегментов для круговой диаграммы (как на экране Статистика в 123.jpg)
-    // Группируем по платежам, чтобы показать долю каждого
     let currentOffset = 0;
     const chartSegments = monthlyPayments.map((p) => {
       const share = total > 0 ? (Number(p.amount) / total) * 100 : 0;
@@ -108,23 +179,6 @@ export default function App() {
 
     return { total, paid, remaining, percent, segments: chartSegments };
   }, [monthlyPayments]);
-
-  const generateMonthlyFromTemplates = (allTemplates) => {
-    const newMonthly = allTemplates.map((t, idx) => {
-      // Ищем старый платеж, чтобы сохранить статус отметки "Выполнено"
-      const existing = monthlyPayments.find(p => p.templateId === t.id);
-      return {
-        id: `m-${t.id}`,
-        templateId: t.id,
-        name: t.name,
-        amount: Number(t.amount),
-        day: t.period === 'Еженедельно' ? t.dayOfWeek : t.day,
-        completed: existing ? existing.completed : false,
-        color: t.color || COLOR_PALETTE[idx % COLOR_PALETTE.length]
-      };
-    });
-    setMonthlyPayments(newMonthly);
-  };
 
   const handleSaveTemplate = (e) => {
     e.preventDefault();
@@ -147,49 +201,33 @@ export default function App() {
 
     setTemplates(updatedTemplates);
     setIsModalOpen(false);
-    
-    // Синхронизируем список на месяц мгновенно
-    const newMonthly = updatedTemplates.map((t, idx) => {
-      const existing = monthlyPayments.find(p => p.templateId === t.id);
-      return {
-        id: `m-${t.id}`,
-        templateId: t.id,
-        name: t.name,
-        amount: Number(t.amount),
-        day: t.period === 'Еженедельно' ? t.dayOfWeek : t.day,
-        completed: existing ? existing.completed : false,
-        color: t.color || COLOR_PALETTE[idx % COLOR_PALETTE.length]
-      };
-    });
-    setMonthlyPayments(newMonthly);
   };
 
   const deleteTemplate = (id) => {
     const updated = templates.filter(t => t.id !== id);
     setTemplates(updated);
-    setMonthlyPayments(prev => prev.filter(p => p.templateId !== id));
   };
 
   const toggleComplete = (id) => {
-    setMonthlyPayments(prev => prev.map(p => 
-      p.id === id ? { ...p, completed: !p.completed } : p
-    ));
+    setMonthlyPayments(prev => {
+      const updated = prev.map(p => 
+        p.id === id ? { ...p, completed: !p.completed } : p
+      );
+      localStorage.setItem('saldo_monthly', JSON.stringify(updated));
+      return updated;
+    });
   };
 
-  // Сортировка списка на месяц: невыполненные выше (по возрастанию дат), выполненные в самом низу
   const sortedMonthly = useMemo(() => {
     const sorted = [...monthlyPayments].sort((a, b) => {
-      // Сначала разделяем по признаку выполнения
       if (a.completed !== b.completed) {
         return a.completed ? 1 : -1;
       }
-      // Внутри групп сортируем по дате (попроще, числом)
       const dayA = parseInt(a.day) || 0;
       const dayB = parseInt(b.day) || 0;
       return dayA - dayB;
     });
 
-    // Применяем фильтр по аналогии со вкладками "Мне должны / Я должен" из 123.jpg
     if (monthFilter === 'pending') {
       return sorted.filter(p => !p.completed);
     }
@@ -201,11 +239,11 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-[#F0F2F6] text-[#111214] flex justify-center font-sans antialiased">
-      {/* Имитация премиального смартфона, идеально повторяющего интерфейс Saldo */}
+      {/* Имитация корпуса смартфона (в стиле Saldo из 123.jpg) */}
       <div className="w-full max-w-md bg-white min-h-screen shadow-[0_24px_64px_-16px_rgba(0,0,0,0.15)] flex flex-col relative pb-28 overflow-hidden rounded-none md:rounded-[40px] md:my-6 md:min-h-[840px] md:max-h-[900px]">
         
         {/* ШАПКА ПРИЛОЖЕНИЯ В СТИЛЕ SALDO */}
-        <header className="px-6 pt-6 pb-4 bg-white flex justify-between items-center border-b border-[#F0F2F6]">
+        <header className="px-6 pt-8 pb-4 bg-white flex justify-between items-center border-b border-[#F0F2F6]">
           <div>
             <h1 className="text-2xl font-black tracking-tight text-[#1A1C1F]">
               {activeTab === 'home' && 'Статистика'}
@@ -228,17 +266,15 @@ export default function App() {
           {activeTab === 'home' && (
             <div className="space-y-5 animate-fadeIn">
               
-              {/* Кольцевой прогресс-бар и финансовые метрики в стиле 123.jpg */}
+              {/* Кольцевой прогресс-бар в стиле 123.jpg */}
               <div className="bg-white rounded-[32px] p-6 shadow-[0_8px_32px_rgba(0,0,0,0.03)] border border-[#EFF2F7] flex flex-col items-center">
                 
-                {/* Легендарный круговой секторный график как в Saldo */}
+                {/* Круговой секторный график */}
                 <div className="relative w-44 h-44 flex items-center justify-center mb-6 mt-2">
                   <svg className="w-full h-full transform -rotate-90" viewBox="0 0 36 36">
-                    {/* Фоновая серая подложка */}
                     <circle cx="18" cy="18" r="15.915" fill="none" stroke="#F1F3F7" strokeWidth="3.2" />
                     
-                    {/* Цветные сегменты на основе структуры расходов */}
-                    {stats.segments.map((seg, i) => (
+                    {stats.segments.map((seg) => (
                       <circle
                         key={seg.id}
                         cx="18"
@@ -255,7 +291,7 @@ export default function App() {
                     ))}
                   </svg>
                   
-                  {/* Контент внутри кольца */}
+                  {/* Внутреннее наполнение */}
                   <div className="absolute text-center flex flex-col items-center justify-center">
                     <span className="text-[10px] uppercase tracking-wider text-[#8E939F] font-bold">Осталось оплатить</span>
                     <span className="text-xl font-black mt-1 text-[#1A1C1F]">
@@ -267,7 +303,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Быстрая статистика в 2 колонки */}
+                {/* Статистические показатели */}
                 <div className="w-full grid grid-cols-2 gap-4 pt-4 border-t border-[#F2F4F7]">
                   <div className="text-center border-r border-[#F2F4F7]">
                     <span className="text-[10px] uppercase text-[#8E939F] font-bold block">Оплачено</span>
@@ -286,12 +322,11 @@ export default function App() {
 
               {/* Легенда категорий как на скриншоте 123.jpg */}
               <div className="bg-white rounded-[24px] p-5 shadow-[0_8px_24px_rgba(0,0,0,0.02)] border border-[#EFF2F7] space-y-3.5">
-                <h3 className="text-xs font-black text-[#8E939F] uppercase tracking-wider mb-1">Структура платежей</h3>
+                <h3 className="text-xs font-black text-[#8E939F] uppercase tracking-wider mb-1">Структура платежей на этот месяц</h3>
                 
                 {stats.segments.map((seg) => (
                   <div key={seg.id} className="flex items-center justify-between">
                     <div className="flex items-center space-x-3">
-                      {/* Цветной маркер как на скриншоте */}
                       <span className="w-3 h-3 rounded-full shrink-0" style={{ backgroundColor: seg.color }}></span>
                       <span className={`text-sm font-bold ${seg.completed ? 'text-[#8E939F] line-through' : 'text-[#1A1C1F]'}`}>
                         {seg.name}
@@ -303,6 +338,10 @@ export default function App() {
                     </div>
                   </div>
                 ))}
+
+                {stats.segments.length === 0 && (
+                  <p className="text-xs text-[#8E939F] text-center py-4">Нет активных платежей в этом месяце.</p>
+                )}
               </div>
 
             </div>
@@ -312,7 +351,7 @@ export default function App() {
           {activeTab === 'month' && (
             <div className="space-y-4 animate-fadeIn">
               
-              {/* Пилюля-фильтр в стиле "Мне должны / Я должен" из 123.jpg */}
+              {/* Пилюля-фильтр */}
               <div className="bg-[#E9ECEF] p-1 rounded-2xl flex items-center justify-between shadow-inner">
                 <button 
                   onClick={() => setMonthFilter('all')}
@@ -334,7 +373,7 @@ export default function App() {
                 </button>
               </div>
 
-              {/* Список платежей */}
+              {/* Список задач текущего месяца */}
               <div className="space-y-3">
                 {sortedMonthly.map((payment) => (
                   <div 
@@ -347,7 +386,7 @@ export default function App() {
                   >
                     <div className="flex items-center space-x-4 flex-1 min-w-0">
                       
-                      {/* Интерактивный Чекбокс - ЗЕЛЕНЫЙ ПРИ АКТИВНОСТИ */}
+                      {/* Чекбокс - зеленый при активности */}
                       <button 
                         onClick={() => toggleComplete(payment.id)}
                         className={`w-7 h-7 rounded-xl flex items-center justify-center border-2 transition-all duration-300 shrink-0 ${
@@ -359,7 +398,6 @@ export default function App() {
                         {payment.completed && <Check size={18} strokeWidth={4} />}
                       </button>
 
-                      {/* Текст со стилизацией */}
                       <div className="min-w-0">
                         <p className={`text-sm font-bold leading-tight truncate transition-all ${
                           payment.completed ? 'line-through text-[#8E939F]' : 'text-[#1A1C1F]'
@@ -367,8 +405,7 @@ export default function App() {
                           {payment.name}
                         </p>
                         <div className="flex items-center space-x-2 mt-1">
-                          {/* Маленькая точка цвета категории */}
-                          <span className="w-2 h-2 rounded-full shrink-0" style={{ backgroundColor: payment.color }}></span>
+                          <span className="w-2.5 h-2.5 rounded-full shrink-0" style={{ backgroundColor: payment.color }}></span>
                           <span className="text-[10px] text-[#8E939F] font-bold uppercase">
                             День: {payment.day}
                           </span>
@@ -376,7 +413,6 @@ export default function App() {
                       </div>
                     </div>
 
-                    {/* Сумма */}
                     <p className={`text-base font-black ${
                       payment.completed ? 'text-[#8E939F]' : 'text-[#1A1C1F]'
                     }`}>
@@ -389,7 +425,7 @@ export default function App() {
                   <div className="text-center py-16">
                     <Calendar className="w-12 h-12 text-[#A0A5AB] mx-auto mb-3 stroke-[1.5]" />
                     <p className="text-sm font-bold text-[#1A1C1F]">Список пуст</p>
-                    <p className="text-xs text-[#8E939F] mt-1">Нет платежей, соответствующих выбранному фильтру.</p>
+                    <p className="text-xs text-[#8E939F] mt-1">Нет активных платежей по выбранному фильтру на этот месяц.</p>
                   </div>
                 )}
               </div>
@@ -426,7 +462,6 @@ export default function App() {
                   <div key={t.id} className="bg-white border border-[#EFF2F7] rounded-[24px] p-5 shadow-[0_8px_24px_rgba(0,0,0,0.02)]">
                     <div className="flex justify-between items-start">
                       <div className="flex items-start space-x-3">
-                        {/* Индикатор цвета шаблона */}
                         <span className="w-3 h-3 rounded-full mt-1.5 shrink-0" style={{ backgroundColor: t.color || '#5B50F2' }}></span>
                         <div>
                           <h4 className="font-bold text-sm text-[#1A1C1F]">{t.name}</h4>
@@ -442,7 +477,6 @@ export default function App() {
                         </div>
                       </div>
                       
-                      {/* Кнопка быстрого удаления */}
                       <button 
                         onClick={() => deleteTemplate(t.id)} 
                         className="p-1.5 text-[#FF3B30] hover:bg-red-50 rounded-lg transition-colors"
@@ -472,7 +506,7 @@ export default function App() {
                   <div className="text-center py-16">
                     <FileText className="w-12 h-12 text-[#A0A5AB] mx-auto mb-3 stroke-[1.5]" />
                     <p className="text-sm font-bold text-[#1A1C1F]">Шаблоны отсутствуют</p>
-                    <p className="text-xs text-[#8E939F] mt-1">Создайте шаблон, чтобы он появился в плане месяца.</p>
+                    <p className="text-xs text-[#8E939F] mt-1">Создайте регулярные шаблоны для формирования плана.</p>
                   </div>
                 )}
               </div>
@@ -480,7 +514,7 @@ export default function App() {
           )}
         </main>
 
-        {/* ==================== НИЖНЯЯ ПАНЕЛЬ НАВИГАЦИИ (СТИЛЬ SALDO, БЕЗ НАДПИСЕЙ) ==================== */}
+        {/* ==================== НИЖНЯЯ ПАНЕЛЬ НАВИГАЦИИ (МИНМАЛИСТИЧНЫЙ ВИД ИЗ 123.jpg) ==================== */}
         <nav className="absolute bottom-0 w-full h-20 bg-white border-t border-[#F0F2F6] flex justify-around items-center px-8 pb-4 z-30 shadow-[0_-8px_24px_rgba(0,0,0,0.02)]">
           
           <button 
@@ -506,12 +540,12 @@ export default function App() {
 
         </nav>
 
-        {/* Имитатор системного нижнего индикатора для полного соответствия */}
+        {/* Индикатор устройства */}
         <div className="absolute bottom-1 w-full flex justify-center pointer-events-none z-40">
           <div className="w-32 h-1 bg-[#1A1C1F] rounded-full opacity-20"></div>
         </div>
 
-        {/* ==================== УМНОЕ МОДАЛЬНОЕ ОКНО СОЗДАНИЯ/ИЗМЕНЕНИЯ ==================== */}
+        {/* ==================== УМНОЕ МОДАЛЬНОЕ ОКНО СТРУКТУРЫ ДАТЫ ==================== */}
         {isModalOpen && (
           <div className="absolute inset-0 bg-black/50 backdrop-blur-xs z-50 flex items-end animate-fadeIn">
             <div className="bg-white w-full rounded-t-[32px] p-6 pb-10 space-y-5 animate-slideUp max-h-[85vh] overflow-y-auto shadow-[0_-12px_36px_rgba(0,0,0,0.1)]">
@@ -529,7 +563,6 @@ export default function App() {
               </div>
 
               <form onSubmit={handleSaveTemplate} className="space-y-4">
-                {/* Название */}
                 <div>
                   <label className="text-[10px] font-black uppercase text-[#8E939F] mb-1.5 block">Название платежа</label>
                   <input 
@@ -543,7 +576,6 @@ export default function App() {
                 </div>
 
                 <div className="grid grid-cols-2 gap-4">
-                  {/* Сумма */}
                   <div>
                     <label className="text-[10px] font-black uppercase text-[#8E939F] mb-1.5 block">Сумма (₽)</label>
                     <input 
@@ -555,7 +587,6 @@ export default function App() {
                     />
                   </div>
                   
-                  {/* Период */}
                   <div>
                     <label className="text-[10px] font-black uppercase text-[#8E939F] mb-1.5 block">Период</label>
                     <select 
@@ -571,13 +602,13 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* ДИНАМИЧЕСКИЕ НАСТРОЙКИ ДАТЫ ДЛЯ UX 2026 */}
+                {/* Динамическая настройка даты в зависимости от периодичности */}
                 <div className="bg-[#F8F9FB] p-4 rounded-2xl border border-[#EFF2F7] space-y-3">
                   
-                  {/* Сценарий: Еженедельно */}
+                  {/* Еженедельно */}
                   {currentTemplate.period === 'Еженедельно' && (
                     <div>
-                      <label className="text-[10px] font-black uppercase text-[#8E939F] mb-2 block text-center">Выберите день недели</label>
+                      <label className="text-[10px] font-black uppercase text-[#8E939F] mb-2 block text-center">День недели</label>
                       <div className="flex justify-between gap-1">
                         {DAYS_OF_WEEK.map(d => (
                           <button 
@@ -590,12 +621,11 @@ export default function App() {
                           </button>
                         ))}
                       </div>
-                      {/* Индикация неактивности стандартного поля */}
                       <p className="text-[9px] text-[#A0A5AB] text-center mt-2.5">Число месяца неактивно для еженедельных платежей</p>
                     </div>
                   )}
 
-                  {/* Сценарий: Ежегодно */}
+                  {/* Ежегодно */}
                   {currentTemplate.period === 'Ежегодно' && (
                     <div className="grid grid-cols-2 gap-3">
                       <div>
@@ -622,7 +652,7 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* Сценарий: Ежеквартально */}
+                  {/* Ежеквартально */}
                   {currentTemplate.period === 'Ежеквартально' && (
                     <div className="grid grid-cols-2 gap-3">
                       <div>
@@ -649,7 +679,7 @@ export default function App() {
                     </div>
                   )}
 
-                  {/* Сценарий: Ежемесячно */}
+                  {/* Ежемесячно */}
                   {currentTemplate.period === 'Ежемесячно' && (
                     <div>
                       <label className="text-[10px] font-black uppercase text-[#8E939F] mb-1.5 block">Число месяца (1-31)</label>
@@ -665,7 +695,7 @@ export default function App() {
                   )}
                 </div>
 
-                {/* Выбор цвета категории для соответствия скриншоту 123.jpg */}
+                {/* Выбор цвета категории */}
                 <div>
                   <label className="text-[10px] font-black uppercase text-[#8E939F] mb-2 block">Цветовой маркер</label>
                   <div className="flex gap-2">
